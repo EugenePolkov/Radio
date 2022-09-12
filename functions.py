@@ -10,47 +10,29 @@ rt = pd.read_csv('./src/data/data.csv', sep=';')
 # Main functions
 
 # Расчет рейтинга 15-минутки
-def reach_slot(id_list, day, ch, slot):
-    df = diary[diary['Member_nr'].isin(id_list)]
-    df_c = df[df['Chl_id'] == ch]
-    df_d = df_c[df_c['day'] == day]
-    return np.dot(df_d['weights'].values, df_d[slot].values) * 7 / 15138
+def reach_slot(day, ch, slot):
+    df = diary[(diary['day'] == day) & (diary['Chl_id'] == ch)]
+    return np.dot(df['weights'].values, df[slot].values) * 7 / 15138
 
 
-# Итоговый недельный Reach по нескольким станциям
-def grp (id_list, ch_list, days_list, n_hours, n):
-
-    # Формирование аудитории станций, потом фильтр по ЦА
-    first_aud = diary[diary['Chl_id'] == ch_list[0]]
-    for ch in (ch_list):
-        if ch != ch_list[0]:
-            sec_aud = diary[diary['Chl_id'] == ch]
-            cum_aud = pd.concat([first_aud, sec_aud], ignore_index=True)
-            first_aud = cum_aud
-    fin_aud = first_aud[first_aud['Member_nr'].isin(id_list)]
-
-    # GRP
+# расчет GRP (wrapper)
+def grp (ch, days_list, n_hours, n):
+    df = diary[diary['Chl_id'] == ch]
+    # GRP по дням
     grp_list = []
     for ds in days_list:
-        grp_list.append(GRP_m(first_aud, 15138, ds, n, n_hours))
+        grp_list.append(GRP_m(df, 15138, ds, n, n_hours))
     total_grp = sum(grp_list)
-    return total_grp
+    return round (total_grp, 2 )
 
 
-# Базовый расчет Reach 1+ по одному дню и станции на основе методики DAR - через суммирование личных рейтингов слушания респондентов (параметры: day - день, ch -номер станции, n - кол-во роликов в час, *n_hours - час(ы), с которых стартует размещение)
-def RN(id_list, ch, day, n_hours, n):
-    aud = diary[diary['Member_nr'].isin(id_list)]
-    r1 = rt[rt['ID'].isin(id_list)]
-    sample_size = r1['w'].sum()
-    df1 = aud[(aud['day'] == day) & (aud['Chl_id'] == ch)]
-    col_list = spot_list(n_hours)
-    df1['sum'] = df1.loc[:, col_list].sum(axis=1) * n / 4
-    df1['E'] = df1['sum'].apply(cut)
-    Rn = np.dot(df1['weights'], df1['E']) * 7 / sample_size
-    # print (np.dot (df1['weights'], df1['E'])/df1['weights'].sum())
-    aud_size = (sample_size / 15138) * 10973.3
-    # print ('GRP', GRP (aud, day, ch, n, n_hours))
-    return Rn, Rn * aud_size, GRP(aud, day, ch, n, n_hours), aud_size, sample_size
+# Базовый расчет Reach 1+ по одному дню и станции на основе методики DAR - через суммирование личных рейтингов слушания респондентов
+def Reach_day (ch, day, n_hours, n):
+    aud = diary[(diary['Chl_id']==ch) & (diary['day']==day)]
+    col_list = [str(x) for x in spot_list(n_hours)]
+    aud['sum'] = aud.loc[:, col_list].sum(axis=1) * n / 4
+    aud['E'] = aud['sum'].apply(cut)
+    return np.dot(aud['weights'], aud['E']) * 7 / 15138
 
 
 # Расчет Reach 1+ по объединенной аудитории нескольких станций
@@ -176,7 +158,7 @@ def WR_cum(id_list, ch_list, days_list, n_hours, n):
     # Расчет WR
     WR, sample_size, aud_size = weekly_reach(id_list, ch_list)
 
-    # Формирование  аудитории станций, потом фильтр по ЦА
+    # Формирование аудитории станций, потом фильтр по ЦА
     first_aud = diary[diary['Chl_id'] == ch_list[0]]
     for ch in (ch_list):
         if ch != ch_list[0]:
