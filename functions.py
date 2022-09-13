@@ -11,28 +11,92 @@ rt = pd.read_csv('./src/data/data.csv', sep=';')
 
 # Расчет рейтинга 15-минутки
 def reach_slot(day, ch, slot):
-    df = diary[(diary['day'] == day) & (diary['Chl_id'] == ch)]
-    return np.dot(df['weights'].values, df[slot].values) * 7 / 15138
+    aud = diary[(diary['day'] == day) & (diary['Chl_id'] == ch)]
+    return np.dot(aud['weights'].values, aud[slot].values) * 7 / 15138
 
 
 # расчет GRP (wrapper)
 def grp (ch, days_list, n_hours, n):
-    df = diary[diary['Chl_id'] == ch]
+    aud = diary[diary['Chl_id'] == ch]
     # GRP по дням
     grp_list = []
     for ds in days_list:
-        grp_list.append(GRP_m(df, 15138, ds, n, n_hours))
+        grp_list.append(GRP_m(aud, 15138, ds, n, n_hours))
     total_grp = sum(grp_list)
     return round (total_grp, 2 )
 
 
 # Базовый расчет Reach 1+ по одному дню и станции на основе методики DAR - через суммирование личных рейтингов слушания респондентов
-def Reach_day (ch, day, n_hours, n):
+def reach_day (ch, day, n_hours, n):
     aud = diary[(diary['Chl_id']==ch) & (diary['day']==day)]
     col_list = [str(x) for x in spot_list(n_hours)]
     aud['sum'] = aud.loc[:, col_list].sum(axis=1) * n / 4
     aud['E'] = aud['sum'].apply(cut)
     return np.dot(aud['weights'], aud['E']) * 7 / 15138
+
+# Расчет охвата по нескольким дням
+def mix_reach( ch, days_list, n_hours, n):
+    # Расчет WR
+    WR = np.dot(np.where (rt['week_list']==0,0,1),rt['w'])/15138
+
+    # Расчет кэмпэйн ричей
+    reach_c = []
+    for day in (days_list):
+        r_c = reach_day (ch, day, n_hours, n)
+        reach_c.append(r_c)
+    total_c = sum(reach_c)
+
+    # Подсчет RCR
+    tc = 1
+    for d_r in reach_c:
+        tc = tc * (1 - d_r / WR)
+    RCR = 1 - tc
+
+    # Подсчет RSR и максимального поправочного коэф-нта к расчетам по RCR
+    reach_s_max = []
+    c_l = []
+    for i in range(0, 24):
+        c_l.append(i)
+    for day in range(1, 8):
+        r_s  = reach_day (ch, day, c_l, 12)
+        reach_s_max.append(r_s)
+    total_s_max = sum(reach_s_max)
+    ts1 = 1
+    for dr in reach_s_max:
+        ts1 = ts1 * (1 - dr / WR)
+    RSR = 1 - ts1
+    ratio_cf = 1 / RSR
+
+    # Скалирование коэф-нта к RCR
+    fin_ratio_cf = ((ratio_cf - 1) * (total_c / total_s_max)) + 1
+    return fin_ratio_cf * RCR * WR
+
+# Оформление итогового МП
+def mp(ch, days_list, n_hours, n):
+    mp_d =dict()
+    reach = mix_reach(ch, days_list, n_hours, n)
+    gr = grp (ch, days_list, n_hours, n )
+    a, k = parNBD(reach, gr/100)
+    mp_d['GI']= 1
+    mp_d['Frequency']=1
+    mp_d['Index T/U Reach']=gr/gr
+    mp_d['GRP']=gr
+    mp_d['TRP']=gr
+    mp_d['RP Index']=100.00
+    mp_d['Spots']=100.00
+    mp_d['RP Index']=100.00
+    mp_d['Reach% 1+ ']= reach
+    for i in range(1, 6):
+        r = i + 1
+        mp_d[f'Reach% {r}+ '] =mp_d[f'Reach% {i}+ '] - NBD(i, a, k)*100
+    mp_d['Reach 1+']=round (reach*10973.3, 2)
+    for i in range(1, 6):
+        r = i + 1
+        mp_d[f'Reach {r}+ '] = round(mp_d[f'Reach% {r}+ '] * 10973.3, 2)
+    for i in range(1, 6):
+        mp_d[f'Reach% {i}+ '] = round(mp_d[f'Reach% {i}+ ']*100, 2)
+    return mp_d
+
 
 
 # Расчет Reach 1+ по объединенной аудитории нескольких станций
@@ -364,20 +428,19 @@ def NBD(i, a, k):
 #    rb['p(%s)'% r ]=NBD (r, a=a, k=k)*10973.3
 #  return rb
 
-
-def reach_NBD(id_list, reach, grp):
-    r1 = rt[rt['ID'].isin(id_list)]
-    sample_size = r1['w'].sum()
-    aud_size = (sample_size / 15138) * 10973.3
+def reach_NBD(reach, grp):
     a, k = parNBD(reach, grp)
     R_fin = dict()
-    R_fin['Reach 1+ '] = reach
-    R_fin['Reach, 000, 1+ '] = reach * aud_size
-    for i in range(1, 7):
+    R_fin['Reach% 1+ '] = round (reach, 4)
+    R_fin['Reach 1+ '] = round (reach * 10973.3,2)
+    for i in range(1, 6):
         r = i + 1
-        R_fin['Reach %s+ ' % r] = R_fin['Reach %s+ ' % i] - NBD(i, a, k)
-        R_fin['Reach, 000, %s+ ' % r] = R_fin['Reach %s+ ' % r] * aud_size
+        R_fin[f'Reach% {r}+ '] = round((R_fin[f'Reach% {i}+ '] - NBD(i, a, k))*100, 4)
+    for i in range(1, 6):
+        r = i + 1
+        R_fin[f'Reach {r}+ '] = round(R_fin[f'Reach% {r}+ '] * 10973.3, 2)
     return R_fin
+
 
 
 # Функция для вычисления парамеров a и k для NBD-распределения (параметры: Reach - Reach 1+ в виде дроби (%/100), GRP - накопленный GRP/TRP в МП в виде дроби (%/100))
@@ -418,6 +481,9 @@ def cut(x):
     else:
         return x
 
+# критерий для выбора распределения
+def crit(reach, grp):
+    return grp / np.log(1-reach)
 
 # Расчет WR, Sample size, Aud size для ЦА
 def weekly_reach(id_list, ch_list):
@@ -436,37 +502,3 @@ def weekly_reach(id_list, ch_list):
     tw = df2['w'].sum()
     return tw / ss, ss, aus
 
-
-# Формирование аудитории по ЦА и списку каналов
-def aud_form(id_list, ch_list):
-    first_aud = diary[diary['Chl_id'] == ch_list[0]]
-    for ch in (ch_list):
-        if ch != ch_list[0]:
-            sec_aud = diary[diary['Chl_id'] == ch]
-            cum_aud = pd.concat([first_aud, sec_aud], ignore_index=True)
-            first_aud = cum_aud
-    fin_aud = first_aud[first_aud['Member_nr'].isin(id_list)]
-    return fin_aud
-
-
-# обрезка значений до 1, если значение больше 1, но меньше 2
-def cut_sharp(x):
-    if ((x < 0) | (x >= 2)):
-        return 0
-    elif x > 1:
-        return 1 - (x - int(x))
-    else:
-        return x
-
-
-# округление до ближайшего целого (0.5 округляется в большую сторону)
-def rnd(x):
-    a = int(x)
-    if x - a < 0.5:
-        return a
-    else:
-        return a + 1
-
-    # функция f(x)=0 для поиска корней
-# def fnc (x):
-#  return (-Rat_day/np.log(1-Reach_day))*np.log(1+x)-x
