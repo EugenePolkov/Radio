@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import scipy as sc
 
-diary = pd.read_csv('./src/data/diary.csv', sep=';')
+diary = pd.read_csv('src/data/diary_full.csv', sep=';')
 rt = pd.read_csv('./src/data/data.csv', sep=';')
 
 
